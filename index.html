@@ -1,75 +1,186 @@
 <!DOCTYPE html>
-<html>
+<html lang="es">
 <head>
-<title>Scanner FBA</title>
-<meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Scanner FBA</title>
+  <style>
+    body{
+      font-family: Arial, sans-serif;
+      text-align:center;
+      background:#0f172a;
+      color:white;
+      margin:0;
+      padding:40px 16px;
+    }
+    h1{ margin: 10px 0 20px; }
+    .box{ max-width: 420px; margin: 0 auto; }
+    input{
+      width: 260px;
+      padding:10px;
+      border-radius:8px;
+      border: none;
+      margin: 6px 0;
+    }
+    button{
+      padding:10px 14px;
+      border-radius:999px;
+      border:none;
+      cursor:pointer;
+      margin: 8px 6px;
+    }
+    #result{ margin-top: 14px; font-size: 18px; }
+    #scannerWrap{
+      margin: 18px auto 0;
+      width: min(92vw, 520px);
+      display:none;
+    }
+    #interactive{
+      width: 100%;
+      border-radius: 14px;
+      overflow: hidden;
+      background: #111827;
+      border: 1px solid rgba(255,255,255,.15);
+    }
+    .help{
+      font-size: 13px;
+      opacity: .85;
+      margin-top: 10px;
+      line-height: 1.35;
+    }
+  </style>
 </head>
+<body>
+  <div class="box">
+    <h1>Scanner FBA</h1>
 
-<body style="font-family:Arial;text-align:center;background:#0f172a;color:white">
+    <input id="code" placeholder="UPC o ASIN" />
+    <br>
+    <input id="cost" placeholder="Costo $" />
+    <br>
 
-<h1>Scanner FBA</h1>
+    <button onclick="analyze()">Analizar</button>
+    <button onclick="startScan()">Escanear código</button>
+    <button onclick="stopScan()" id="stopBtn" style="display:none;">Detener</button>
 
-<input id="code" placeholder="UPC o ASIN"><br><br>
-<input id="cost" placeholder="Costo $"><br><br>
+    <p id="result"></p>
 
-<button onclick="analyze()">Analizar</button>
-  <br><br>
-<button onclick="scanBarcode()">Escanear código</button>
+    <div id="scannerWrap">
+      <div id="interactive"></div>
+      <div class="help">
+        Tips: buena luz, acerca el código hasta que ocupe bastante pantalla, mantén el teléfono quieto 1–2 segundos.
+      </div>
+    </div>
+  </div>
 
-<p id="result"></p>
+  <!-- Quagga2 (lector real de códigos de barras: UPC/EAN/Code128) -->
+  <script src="https://cdn.jsdelivr.net/npm/@ericblade/quagga2/dist/quagga.min.js"></script>
 
-  <script src="https://unpkg.com/@zxing/library@latest"></script>
-<script>
-async function analyze(){
-const code=document.getElementById("code").value;
-const cost=document.getElementById("cost").value;
+  <script>
+    async function analyze(){
+      const code = document.getElementById("code").value.trim();
+      const cost = document.getElementById("cost").value.trim();
 
-const res=await fetch("/api/analyze",{
-method:"POST",
-headers:{ "Content-Type":"application/json" },
-body:JSON.stringify({code,cost})
-});
-
-const data=await res.json();
-document.getElementById("result").innerHTML=
-data.decision+"<br>"+data.summary;
-}
-  async function scanBarcode() {
-  const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment" } });
-  
-  const video = document.createElement("video");
-  video.srcObject = stream;
-  video.setAttribute("playsinline", true);
-  video.play();
-
-  document.body.appendChild(video);
-
-  const canvas = document.createElement("canvas");
-  const ctx = canvas.getContext("2d");
-
-  const scan = () => {
-    if (video.readyState === video.HAVE_ENOUGH_DATA) {
-      canvas.width = video.videoWidth;
-      canvas.height = video.videoHeight;
-      ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
-
-      const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
-
-      const code = jsQR(imageData.data, canvas.width, canvas.height);
-
-      if (code) {
-        document.getElementById("code").value = code.data;
-        stream.getTracks().forEach(track => track.stop());
-        video.remove();
+      if(!code || !cost){
+        document.getElementById("result").innerHTML = "Datos faltantes<br>Introduce UPC/ASIN y costo";
         return;
       }
+
+      try{
+        const res = await fetch("/api/analyze",{
+          method:"POST",
+          headers:{ "Content-Type":"application/json" },
+          body: JSON.stringify({ code, cost })
+        });
+
+        const data = await res.json();
+        document.getElementById("result").innerHTML = (data.decision || "") + "<br>" + (data.summary || "");
+      }catch(e){
+        document.getElementById("result").innerHTML = "Error llamando /api/analyze";
+      }
     }
-    requestAnimationFrame(scan);
-  };
 
-  scan();
-}
-</script>
+    let scanning = false;
 
+    function startScan(){
+      if(scanning) return;
+      scanning = true;
+
+      document.getElementById("result").innerHTML = "Abriendo cámara...";
+      document.getElementById("scannerWrap").style.display = "block";
+      document.getElementById("stopBtn").style.display = "inline-block";
+
+      // IMPORTANTE: en iPhone/iPad debe ser HTTPS y el botón debe ser tocado (ya lo es)
+      Quagga.init({
+        inputStream: {
+          type : "LiveStream",
+          target: document.querySelector('#interactive'),
+          constraints: {
+            facingMode: "environment" // cámara trasera
+          }
+        },
+        locator: {
+          patchSize: "medium",
+          halfSample: true
+        },
+        numOfWorkers: 0, // iOS: mejor 0
+        decoder : {
+          readers : [
+            "upc_reader",
+            "upc_e_reader",
+            "ean_reader",
+            "ean_8_reader",
+            "code_128_reader"
+          ]
+        },
+        locate: true
+      }, function(err) {
+        if (err) {
+          scanning = false;
+          document.getElementById("result").innerHTML =
+            "No se pudo abrir la cámara. Revisa permisos de Safari (Cámara: Permitir).";
+          document.getElementById("stopBtn").style.display = "none";
+          return;
+        }
+        Quagga.start();
+        document.getElementById("result").innerHTML = "Apunta al código de barras…";
+      });
+
+      // cuando detecta un código:
+      Quagga.onDetected(onDetected);
+    }
+
+    function onDetected(data){
+      const code = data?.codeResult?.code;
+      if(!code) return;
+
+      // Llenar el input con el código detectado
+      document.getElementById("code").value = code;
+
+      // feedback
+      document.getElementById("result").innerHTML = "Detectado: <b>" + code + "</b>";
+
+      // Detener para que no “parpadee” detectando mil veces
+      stopScan();
+
+      // (opcional) si ya pusiste costo, analiza automáticamente:
+      const cost = document.getElementById("cost").value.trim();
+      if(cost) analyze();
+    }
+
+    function stopScan(){
+      if(!scanning) return;
+      scanning = false;
+
+      try{
+        Quagga.offDetected(onDetected);
+        Quagga.stop();
+      }catch(e){}
+
+      document.getElementById("stopBtn").style.display = "none";
+      // Puedes dejar la caja visible o esconderla:
+      // document.getElementById("scannerWrap").style.display = "none";
+    }
+  </script>
 </body>
 </html>
