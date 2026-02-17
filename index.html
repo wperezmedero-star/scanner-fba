@@ -13,9 +13,12 @@
 <input id="cost" placeholder="Costo $"><br><br>
 
 <button onclick="analyze()">Analizar</button>
+  <br><br>
+<button onclick="scanBarcode()">Escanear código</button>
 
 <p id="result"></p>
 
+  <script src="https://cdn.jsdelivr.net/npm/jsqr/dist/jsQR.js"></script>
 <script>
 async function analyze(){
 const code=document.getElementById("code").value;
@@ -30,6 +33,41 @@ body:JSON.stringify({code,cost})
 const data=await res.json();
 document.getElementById("result").innerHTML=
 data.decision+"<br>"+data.summary;
+}
+  async function scanBarcode() {
+  const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment" } });
+  
+  const video = document.createElement("video");
+  video.srcObject = stream;
+  video.setAttribute("playsinline", true);
+  video.play();
+
+  document.body.appendChild(video);
+
+  const canvas = document.createElement("canvas");
+  const ctx = canvas.getContext("2d");
+
+  const scan = () => {
+    if (video.readyState === video.HAVE_ENOUGH_DATA) {
+      canvas.width = video.videoWidth;
+      canvas.height = video.videoHeight;
+      ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+
+      const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+
+      const code = jsQR(imageData.data, canvas.width, canvas.height);
+
+      if (code) {
+        document.getElementById("code").value = code.data;
+        stream.getTracks().forEach(track => track.stop());
+        video.remove();
+        return;
+      }
+    }
+    requestAnimationFrame(scan);
+  };
+
+  scan();
 }
 </script>
 
